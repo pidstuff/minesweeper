@@ -7,11 +7,6 @@ var game;
 const EMPT = 0;
 const BOMB = 9;
 
-const MARGIN = 3;
-const GRID_COLS = 10;
-const GRID_ROWS = 10;
-const BLOCK_WIDTH = canvas.width / GRID_COLS;
-const BLOCK_HEIGHT = canvas.height / GRID_ROWS;
 const DICT = {
   0: " ",
   1: 1,
@@ -25,12 +20,26 @@ const DICT = {
   9: "B",
 };
 
+String.prototype.format = function() {
+  var a;
+  var s = this;
+  for (a in arguments) {
+    s = s.replace("{" + a + "}", arguments[a]);
+  }
+  return s;
+}
+
 function Game() {
   this.grid = [];
+  this.grid_margin = 3;
+  this.grid_cols = 10;
+  this.grid_rows = 10;
   this.numberOfBombs;
+  this.minBombs = 5;
+  this.maxBombs = 30;
   this.ongoing = true;
   this.hasInitialClick = false;
-  this.remainingBlocks = GRID_COLS * GRID_ROWS;
+  this.remainingBlocks = this.grid_cols * this.grid_rows;
 }
 
 Game.prototype.revealAllBlocks = function() {
@@ -57,17 +66,17 @@ Game.prototype.insertBombsExceptIn = function(col, row) {
   var bombInput = document.getElementById("bombs").value;
   this.numberOfBombs = bombInput;
   while (bombInput > 0) {
-    var bombX = Math.floor(Math.random() * (GRID_COLS));
-    var bombY = Math.floor(Math.random() * (GRID_ROWS));
+    var bombX = Math.floor(Math.random() * (this.grid_cols));
+    var bombY = Math.floor(Math.random() * (this.grid_rows));
     
     if (col == bombX && row == bombY) {
       continue
-    } else if (this.grid[bombY][bombX].value != BOMB) {
-      let bombBlock = this.grid[bombY][bombX]
+    } else if (!this.grid[bombY][bombX].isBomb()) {
+      let bombBlock = this.grid[bombY][bombX];
       bombBlock.value = BOMB;
       let surroundingBlocks = bombBlock.getSurroundingBlocks();
       surroundingBlocks.forEach( function(block) {
-        if (block.value != BOMB) {
+        if (!block.isBomb()) {
           block.value++;
         }
       });
@@ -76,15 +85,24 @@ Game.prototype.insertBombsExceptIn = function(col, row) {
   }
 }
 
-function Block(col, row, x, y) {
+function Block(col, row, x, y, game) {
   this.col = col;
   this.row = row;
+  this.width = canvas.width / game.grid_cols;
+  this.height = canvas.height / game.grid_rows;
   this.startX = x;
   this.startY = y;
-  this.endX = (x + BLOCK_WIDTH) - MARGIN;
-  this.endY = (y + BLOCK_HEIGHT) - MARGIN;
+  this.endX = (x + this.width) - game.grid_margin;
+  this.endY = (y + this.height) - game.grid_margin;
   this.revealed = false;
   this.value = EMPT;
+}
+
+Block.prototype.isBomb = function() {
+  if (this.value == BOMB) {
+    return true;
+  }
+  return false;
 }
 
 Block.prototype.drawBlock = function(bgColor) {
@@ -92,8 +110,8 @@ Block.prototype.drawBlock = function(bgColor) {
   context.rect(
     this.startX,
     this.startY,
-    BLOCK_WIDTH - MARGIN,
-    BLOCK_HEIGHT - MARGIN
+    this.width - game.grid_margin,
+    this.height - game.grid_margin
     );
   context.fillStyle = bgColor;
   context.fill();
@@ -111,8 +129,8 @@ Block.prototype.drawBlock = function(bgColor) {
   context.textBaseline = "middle";
   context.fillText(
     DICT[this.value],
-    this.startX + (BLOCK_WIDTH / 2),
-    this.startY + (BLOCK_HEIGHT / 2)
+    this.startX + (this.width / 2),
+    this.startY + (this.height / 2)
     );
 }
 
@@ -130,7 +148,7 @@ Block.prototype.reveal = function() {
     });
   }
   
-  if (this.value == BOMB && game.ongoing) {
+  if (this.isBomb() && game.ongoing) {
     this.drawBlock("#FF9999");
     game.lost();
     
@@ -144,8 +162,8 @@ Block.prototype.getSurroundingBlocks = function() {
   for (let x=-1; x<=1; x++) {
     for (let y=-1; y<=1; y++) {
       if ((x == 0) && (y == 0)) { continue }
-      let validX = ((this.col + x) >= 0) && ((this.col + x) < GRID_COLS);
-      let validY = ((this.row + y) >= 0) && ((this.row + y) < GRID_ROWS);
+      let validX = ((this.col + x) >= 0) && ((this.col + x) < game.grid_cols);
+      let validY = ((this.row + y) >= 0) && ((this.row + y) < game.grid_rows);
       if (validX && validY) {
         surroundingBlocks.push(game.grid[this.row + y][this.col + x]);
       }
@@ -154,23 +172,50 @@ Block.prototype.getSurroundingBlocks = function() {
   return surroundingBlocks;
 }
 
+function validateInputs() {
+  var isValid = true;
+  var notice = document.createElement("div");
+  var bombInput = parseFloat(document.getElementById("bombs").value);
+  
+  notice.setAttribute("id", "notice");
+  if (!Number.isInteger(bombInput)) {
+    notice.innerHTML = "The input for Bombs must be an integer between {0} and {1}".format(game.minBombs, game.maxBombs);
+    isValid = false;
+  }
+  else if (bombInput < game.minBombs) {
+    notice.innerHTML = "The input for Bombs must be larger than {0}".format(game.minBombs);
+    isValid = false;
+  }
+  else if (bombInput > game.maxBombs) {
+    notice.innerHTML = "The input for Bombs must be smaller than {0}".format(game.maxBombs);
+    isValid = false;
+  }
+  document.getElementById("notice").replaceWith(notice);
+  return isValid;
+}
 
 function init(game) {
   /* Initializes the Minesweeper grid */
   var startX = 0;
   var startY = 0;
-  for (let y=0; y<GRID_ROWS; y++) {
+  var block_height = 0;
+  var block_width = 0;
+  var margin = game.grid_margin;
+  
+  for (let y=0; y<game.grid_rows; y++) {
     startX = 0;
     
     game.grid.push([]);
-    for (let x=0; x<GRID_COLS; x++) {
-      game.grid[y].push(new Block(x, y, startX, startY));
-      context.rect(startX, startY, BLOCK_WIDTH - MARGIN, BLOCK_HEIGHT - MARGIN);
+    for (let x=0; x<game.grid_cols; x++) {
+      game.grid[y].push(new Block(x, y, startX, startY, game));
+      block_height = game.grid[y][x].height;
+      block_width = game.grid[y][x].width;
+      context.rect(startX, startY, block_width - margin, block_height - margin);
       context.fillStyle = "#000000";
       context.fill();
-      startX += BLOCK_WIDTH;
+      startX += block_width;
     }
-    startY += BLOCK_HEIGHT;
+    startY += block_height;
   }
 }
 
@@ -190,10 +235,9 @@ canvas.addEventListener("click", function(event) {
       if (inBlockX && inBlockY) {
       
         if (!game.hasInitialClick) {
-          game.insertBombsExceptIn(col, row)
+          game.insertBombsExceptIn(col, row);
           game.hasInitialClick = true;
         }
-        
         block.reveal();
       }
     });
@@ -202,5 +246,7 @@ canvas.addEventListener("click", function(event) {
 
 document.getElementById("start").addEventListener("click", function(event) {
   game = new Game();
-  init(game);
+  if (validateInputs()) {
+    init(game);
+  }
 });
